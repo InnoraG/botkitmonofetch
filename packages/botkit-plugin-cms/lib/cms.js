@@ -18,7 +18,7 @@ var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, ge
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BotkitCMSHelper = void 0;
 const botkit_1 = require("botkit");
-const cross_fetch_1 = require("cross-fetch");
+const request = require("request");
 const Debug = require("debug");
 const url = require("url");
 const debug = Debug('botkit:cms');
@@ -87,40 +87,44 @@ class BotkitCMSHelper {
                 headers: {
                     'content-type': 'application/json'
                 },
-                method,
+                method: method,
                 form: params
             };
             debug('Make request to Botkit CMS: ', req);
-            const fetchResponse = yield (0, cross_fetch_1.default)(new url.URL(uri + '?access_token=' + this._config.token, this._config.uri), {
-                headers: {
-                    'content-type': 'application/json'
-                },
-                method,
-                body: JSON.stringify(params)
+            return new Promise((resolve, reject) => {
+                request(req, function (err, res, body) {
+                    if (err) {
+                        debug('Error in Botkit CMS api: ', err);
+                        return reject(err);
+                    }
+                    else {
+                        debug('Raw results from Botkit CMS: ', body);
+                        if (body === 'Invalid access token') {
+                            return reject(new Error('Failed to load Botkit CMS content: Invalid access token provided.\nMake sure the token passed into the CMS plugin matches the token set in the CMS .env file.'));
+                        }
+                        let json = null;
+                        try {
+                            json = JSON.parse(body);
+                        }
+                        catch (err) {
+                            debug('Error parsing JSON from Botkit CMS api: ', err);
+                            return reject(err);
+                        }
+                        if (!json || json == null) {
+                            reject(new Error('Botkit CMS API response was empty or invalid JSON'));
+                        }
+                        else if (json.error) {
+                            if (res.statusCode === 401) {
+                                console.error(json.error);
+                            }
+                            reject(json.error);
+                        }
+                        else {
+                            resolve(json);
+                        }
+                    }
+                });
             });
-            const responseData = yield fetchResponse.text();
-            if (!fetchResponse.ok) {
-                throw new Error(`Request failed with status ${fetchResponse.status}: ${responseData}`);
-            }
-            debug('Raw results from Botkit CMS: ', responseData);
-            if (responseData === 'Invalid access token') {
-                throw new Error('Failed to load Botkit CMS content: Invalid access token provided.\nMake sure the token passed into the CMS plugin matches the token set in the CMS .env file.');
-            }
-            let json = null;
-            try {
-                json = JSON.parse(responseData);
-            }
-            catch (err) {
-                debug('Error parsing JSON from Botkit CMS api: ', err);
-                throw err;
-            }
-            if (!json || json == null) {
-                throw new Error('Botkit CMS API response was empty or invalid JSON');
-            }
-            else if (json.error) {
-                throw json.error;
-            }
-            return json;
         });
     }
     getScripts() {
@@ -168,7 +172,7 @@ class BotkitCMSHelper {
             line.channelData.attachments = line.attachments;
         }
         // we might have a facebook attachment in fb_attachments
-        if (line.fb_attachment) {
+        if (line.fb_attachment && typeof (line.fb_attachment) !== 'function') {
             const attachment = line.fb_attachment;
             if (attachment.template_type) {
                 if (attachment.template_type === 'button') {

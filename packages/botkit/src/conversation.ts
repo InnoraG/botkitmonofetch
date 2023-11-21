@@ -9,7 +9,7 @@ import { Botkit, BotkitMessage } from './core';
 import { BotWorker } from './botworker';
 import { BotkitDialogWrapper } from './dialogWrapper';
 import { Activity, ActivityTypes, TurnContext, MessageFactory, ActionTypes } from 'botbuilder';
-import { Dialog, DialogContext, DialogReason, PromptValidatorContext, ActivityPrompt, DialogTurnStatus } from 'botbuilder-dialogs';
+import { Dialog, DialogContext, DialogReason, PromptValidatorContext, ActivityPrompt, DialogTurnStatus, ListStyle, ChoiceFactory, ChoicePrompt, FoundChoice } from 'botbuilder-dialogs';
 import * as mustache from 'mustache';
 import * as Debug from 'debug';
 
@@ -118,6 +118,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
      */
     public script: any; // TODO: define this with typedefs
 
+    private _promptchoice: string;
     private _prompt: string;
     private _beforeHooks: {};
     private _afterHooks: { (context: TurnContext, results: any): void }[];
@@ -141,6 +142,12 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
 
         // Make sure there is a prompt we can use.
         // TODO: maybe this ends up being managed by Botkit
+        this._promptchoice = this.id + '_choice_prompt';
+        this._controller.dialogSet.add(new ChoicePrompt(
+            this._promptchoice,
+            (prompt: PromptValidatorContext<FoundChoice>) => Promise.resolve(true)
+        ));
+
         this._prompt = this.id + '_default_prompt';
         this._controller.dialogSet.add(new ActivityPrompt(
             this._prompt,
@@ -341,7 +348,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
      * @param handlers one or more handler functions defining possible conditional actions based on the response to the question.
      * @param key name of variable to store response in.
      */
-    public ask(message: Partial<BotkitMessageTemplate> | string, handlers: BotkitConvoHandler | BotkitConvoTrigger[], key: {key: string} | string | null): BotkitConversation {
+    public ask(message: Partial<BotkitMessageTemplate> | string, handlers: BotkitConvoHandler | BotkitConvoTrigger[], key: { key: string } | string | null): BotkitConversation {
         this.addQuestion(message, handlers, key, 'default');
         return this;
     }
@@ -355,7 +362,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
      * @param key Name of variable to store response in.
      * @param thread_name Name of thread to which message will be added
      */
-    public addQuestion(message: Partial<BotkitMessageTemplate> | string, handlers: BotkitConvoHandler | BotkitConvoTrigger[], key: {key: string} | string | null, thread_name: string): BotkitConversation {
+    public addQuestion(message: Partial<BotkitMessageTemplate> | string, handlers: BotkitConvoHandler | BotkitConvoTrigger[], key: { key: string } | string | null, thread_name: string): BotkitConversation {
         if (!thread_name) {
             thread_name = 'default';
         }
@@ -519,7 +526,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
      * @param step the current step object
      */
     private async runOnChange(variable: string, value: any, dc: DialogContext, step: BotkitConversationStep): Promise<void> {
-        debug('OnChange:', this.id, variable);
+        debug('OnChange:', this.id, variable, value);
 
         if (this._changeHooks[variable] && this._changeHooks[variable].length) {
             // spawn a bot instance so devs can use API or other stuff as necessary
@@ -530,7 +537,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
 
             for (let h = 0; h < this._changeHooks[variable].length; h++) {
                 const handler = this._changeHooks[variable][h];
-                await handler.call(this, value, convo, bot);
+                await handler.call(this, (typeof (value) === 'object') ? value.value : value, convo, bot);
             }
         }
     }
@@ -590,11 +597,17 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
      * @param step The current step object
      */
     private async onStep(dc, step): Promise<any> {
+        // InnoraG : Let's merge named regex into vars
+        if (step.values.message && step.values.message.matches && step.values.message.matches.groups) { 
+            Object.assign(step.values,step.values.message.matches.groups);
+        }
+
         // Let's interpret the current line of the script.
         const thread = this.script[step.thread];
+        step.result = (typeof (step.result) === 'object' && step.result !== null) ? step.result.value : step.result;
 
         if (!thread) {
-            throw new Error(`Thread '${ step.thread }' not found, did you add any messages to it?`);
+            throw new Error(`Thread '${step.thread}' not found, did you add any messages to it?`);
         }
 
         // Capture the previous step value if there previous line included a prompt
@@ -676,10 +689,53 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
             // This prompt must be a valid dialog defined somewhere in your code!
             if (line.collect && line.action !== 'beginDialog') {
                 try {
-                    return await dc.prompt(this._prompt, await this.makeOutgoing(dc, line, step.values));
+
+                    const madeoutgoing = await this.makeOutgoing(dc, line, step.values);
+
+                    if (madeoutgoing.channelData.quick_replies && step.state.options.channel && (step.state.options.channel.indexOf('whatsapp') !== -1)) {
+                        const choiceArray = madeoutgoing.channelData.quick_replies.map(x => {
+                            switch (x.content_type) {
+                                case 'text':
+                                    return {
+                                        value: x.payload,
+                                        action: {
+                                            type: 'postback',
+                                            title: x.title,
+                                            //value: x.payload
+                                        },
+                                        //synonyms: [x.title]
+                                    }
+                                    break;
+                                case 'user_email':
+                                    return {
+                                        value: x.content_type,
+                                        action: {
+                                            type: 'postback',
+                                            title: x.title,
+                                            //value: x.content_type
+                                        },
+                                        synonyms: ['user_email']
+                                    }
+                                    break;
+                                default:
+                                    break;
+                            }
+                        })
+                        //const choicePromptOptions = ChoiceFactory.forChannel(dc.context, choiceArray, madeoutgoing.text);
+                        const promptOptions = {
+                            prompt: madeoutgoing.text,
+                            choices: ChoiceFactory.toChoices(choiceArray),
+                            style: ListStyle.list
+                            // You can also include a retry prompt if you like,
+                            // but there's no need to include the choices property in a text prompt
+                        };
+                        return await dc.prompt(this._promptchoice, promptOptions);
+                    } else {
+                        return await dc.prompt(this._prompt, await madeoutgoing);
+                    }
                 } catch (err) {
                     console.error(err);
-                    await dc.context.sendActivity(`Failed to start prompt ${ this._prompt }`);
+                    await dc.context.sendActivity(`Failed to start prompt ${this._prompt}`);
                     return await step.next();
                 }
                 // If there's nothing but text, send it!
@@ -687,7 +743,96 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
             } else {
                 // if there is text, attachments, or any channel data fields at all...
                 if (line.type || line.text || line.attachments || line.attachment || line.blocks || (line.channelData && Object.keys(line.channelData).length)) {
-                    await dc.context.sendActivity(await this.makeOutgoing(dc, line, step.values));
+
+                    const madeoutgoing = await this.makeOutgoing(dc, line, step.values);
+
+                    if ((step.state.options.channel.indexOf('whatsapp') !== -1) && madeoutgoing.attachments && madeoutgoing.attachmentLayout && madeoutgoing.attachmentLayout == 'carousel') {
+                        try {
+                            let lastbutton = 0;
+                            const madeoutgoingsingle = JSON.parse(JSON.stringify(madeoutgoing))
+                            for (let attid = 0; attid < madeoutgoing.attachments.length; attid++) {
+                                madeoutgoingsingle.attachments = madeoutgoing.attachments.slice(attid, attid + 1);
+                                madeoutgoingsingle.attachments[0].name = madeoutgoingsingle.attachments[0].content.buttons.length + lastbutton;
+                                madeoutgoingsingle.channelData.attachment.payload.elements = madeoutgoing.channelData.attachment.payload.elements.slice(attid, attid + 1);
+                                madeoutgoingsingle.channelData.attachments = madeoutgoing.channelData.attachments.slice(attid, attid + 1);
+                                madeoutgoingsingle.channelData.attachments[0].name = madeoutgoingsingle.channelData.attachments[0].content.buttons.length + lastbutton;
+                                lastbutton = madeoutgoingsingle.attachments[0].name;
+                                await dc.context.sendActivity(madeoutgoingsingle);
+                            }
+                            /*madeoutgoing.attachments.forEach(attachment => {
+                                let message_body = `*${attachment.content.title}*\n_${attachment.content.subtitle}_\n`;
+                                attachment.content.buttons.forEach(button => {
+                                    message_body += `\n${butc}.${button.title}`;
+                                    butc++;
+                                });
+                                yield dc.context.sendActivity(madeoutgoing);
+                            });*/
+                            const choiceArray = madeoutgoing.attachments.map(hc => {
+                                switch (hc.contentType) {
+                                    case 'application/vnd.microsoft.card.hero':
+                                        return hc.content.buttons.map(b => {
+                                            return {
+                                                value: b.value,
+                                                action: {
+                                                    type: 'postback',
+                                                    title: b.title,
+                                                    //value: x.payload
+                                                },
+                                                //synonyms: [x.title]
+                                            };
+                                        })
+
+                                        break;
+                                    case 'user_email':
+                                        return {
+                                            value: hc.content_type,
+                                            action: {
+                                                type: 'postback',
+                                                title: hc.title,
+                                                //value: x.content_type
+                                            },
+                                            synonyms: ['user_email']
+                                        };
+                                        break;
+                                    default:
+                                        break;
+                                }
+                            });
+                            const choiceArrayFlat = choiceArray.flat();
+                            //const choicePromptOptions = ChoiceFactory.forChannel(dc.context, choiceArray, madeoutgoing.text);
+                            const promptOptions = {
+                                prompt: 'Merci de faire votre choix :',//madeoutgoing.text,
+                                choices: ChoiceFactory.toChoices(choiceArrayFlat),
+                                style: ListStyle.list
+                                // You can also include a retry prompt if you like,
+                                // but there's no need to include the choices property in a text prompt
+                            };
+                            return await dc.prompt(this._promptchoice, promptOptions);
+                        } catch (err) {
+                            console.error(err);
+                            await dc.context.sendActivity(`Failed to start prompt ${this._prompt}`);
+                            return await step.next();
+                        }
+                    } else if (madeoutgoing.attachments && madeoutgoing.attachmentLayout && madeoutgoing.attachmentLayout == 'carousel' && madeoutgoing.attachments.length >= 4) {
+                        // Break long carousel to multiline
+                        const row = Math.ceil(Math.sqrt(madeoutgoing.attachments.length))
+                        const madeoutgoingCopy = Object.assign({}, madeoutgoing);
+                        for (let turn = 0; turn < row && row <= 10; turn++) {
+                            if (turn == row - 1) {
+                                madeoutgoingCopy.attachments = madeoutgoing.attachments.slice(turn * row);
+                                if (madeoutgoingCopy.attachments.length) {
+                                    await dc.context.sendActivity(madeoutgoingCopy);
+                                }
+                            } else {
+                                madeoutgoingCopy.attachments = madeoutgoing.attachments.slice(turn * row, turn * row + row);
+                                await dc.context.sendActivity(madeoutgoingCopy);
+                            }
+                        }
+                    } else {
+                        // sendActivity as usual
+                        await dc.context.sendActivity(madeoutgoing);
+                    }
+
                 } else if (!line.action) {
                     console.error('Dialog contains invalid message', line);
                 }
@@ -734,7 +879,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
             values: state.values,
             next: async (stepResult): Promise<any> => {
                 if (nextCalled) {
-                    throw new Error(`ScriptedStepContext.next(): method already called for dialog and step '${ this.id }[${ index }]'.`);
+                    throw new Error(`ScriptedStepContext.next(): method already called for dialog and step '${this.id}[${index}]'.`);
                 }
                 return await this.resumeDialog(dc, DialogReason.nextCalled, stepResult);
             }
@@ -793,7 +938,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
         // otherwise, if it is an array, pick a random element
         if (line.text && typeof (line.text) === 'string') {
             text = line.text;
-        // If text is a function, call the function to get the actual text value.
+            // If text is a function, call the function to get the actual text value.
         } else if (line.text && typeof (line.text) === 'function') {
             text = await line.text(line, vars);
         } else if (Array.isArray(line.text)) {
@@ -852,6 +997,7 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
 
         // set the type
         if (line.type) {
+            if (line.type === 'delay') outgoing.value = typeof line.value === 'number' ? line.value : 1000;
             outgoing.type = JSON.parse(JSON.stringify(line.type));
         }
 
@@ -996,49 +1142,49 @@ export class BotkitConversation<O extends object = {}> extends Dialog<O> {
         }
 
         switch (path.action) {
-        case 'next':
-            // noop
-            break;
-        case 'complete':
-            step.values._status = 'completed';
-            return await this.end(dc);
-        case 'stop':
-            step.values._status = 'canceled';
-            return await this.end(dc);
-        case 'timeout':
-            step.values._status = 'timeout';
-            return await this.end(dc);
-        case 'execute_script':
-            worker = await this._controller.spawn(dc);
+            case 'next':
+                // noop
+                break;
+            case 'complete':
+                step.values._status = 'completed';
+                return await this.end(dc);
+            case 'stop':
+                step.values._status = 'canceled';
+                return await this.end(dc);
+            case 'timeout':
+                step.values._status = 'timeout';
+                return await this.end(dc);
+            case 'execute_script':
+                worker = await this._controller.spawn(dc);
 
-            await worker.replaceDialog(path.execute.script, {
-                thread: path.execute.thread,
-                ...step.values
-            });
+                await worker.replaceDialog(path.execute.script, {
+                    thread: path.execute.thread,
+                    ...step.values
+                });
 
-            return { status: DialogTurnStatus.waiting };
-        case 'beginDialog':
-            worker = await this._controller.spawn(dc);
+                return { status: DialogTurnStatus.waiting };
+            case 'beginDialog':
+                worker = await this._controller.spawn(dc);
 
-            await worker.beginDialog(path.execute.script, {
-                thread: path.execute.thread,
-                ...step.values
-            });
-            return { status: DialogTurnStatus.waiting };
-        case 'repeat':
-            return await this.runStep(dc, step.index - 1, step.thread, DialogReason.nextCalled);
-        case 'wait':
-            // reset the state so we're still on this step.
-            step.state.stepIndex = step.index - 1;
-            // send a waiting status
-            return { status: DialogTurnStatus.waiting };
-        default:
-            // the default behavior for unknown action in botkit is to gotothread
-            if (this.script[path.action]) {
-                return await this.gotoThreadAction(path.action, dc, step);
-            }
-            console.warn('NOT SURE WHAT TO DO WITH THIS!!', path);
-            break;
+                await worker.beginDialog(path.execute.script, {
+                    thread: path.execute.thread,
+                    ...step.values
+                });
+                return { status: DialogTurnStatus.waiting };
+            case 'repeat':
+                return await this.runStep(dc, step.index - 1, step.thread, DialogReason.nextCalled);
+            case 'wait':
+                // reset the state so we're still on this step.
+                step.state.stepIndex = step.index - 1;
+                // send a waiting status
+                return { status: DialogTurnStatus.waiting };
+            default:
+                // the default behavior for unknown action in botkit is to gotothread
+                if (this.script[path.action]) {
+                    return await this.gotoThreadAction(path.action, dc, step);
+                }
+                console.warn('NOT SURE WHAT TO DO WITH THIS!!', path);
+                break;
         }
 
         return false;

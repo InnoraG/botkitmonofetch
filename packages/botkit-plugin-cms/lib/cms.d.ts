@@ -6,11 +6,6 @@
  * Licensed under the MIT License.
  */
 import { Botkit, BotkitDialogWrapper, BotkitMessage, BotWorker } from 'botkit';
-export interface CMSOptions {
-    uri: string;
-    token: string;
-    controller?: Botkit;
-}
 /**
  * A plugin for Botkit that provides access to an instance of [Botkit CMS](https://github.com/howdyai/botkit-cms), including the ability to load script content into a DialogSet
  * and bind before, after and onChange handlers to those dynamically imported dialogs by name.
@@ -113,4 +108,9 @@ export declare class BotkitCMSHelper {
     * @param handler A handler function in the form async(results, bot) => {}
     */
     after(script_name: string, handler: (results: any, bot: BotWorker) => Promise<void>): void;
+}
+export interface CMSOptions {
+    uri: string;
+    token: string;
+    controller?: Botkit;
 }

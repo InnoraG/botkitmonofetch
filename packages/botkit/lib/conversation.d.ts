@@ -107,6 +107,7 @@ export declare class BotkitConversation<O extends object = {}> extends Dialog<O>
      * A map of every message in the dialog, broken into threads
      */
     script: any;
+    private _promptchoice;
     private _prompt;
     private _beforeHooks;
     private _afterHooks;
