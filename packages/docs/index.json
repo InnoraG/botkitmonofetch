@@ -1,0 +1,92 @@
+{
+  "reference": [
+    {
+      "name": "Botkit Core",
+      "packageName": "BotWorker",
+      "path": "reference/core.md",
+      "classes": [],
+      "interfaces": []
+    },
+    {
+      "name": "Botkit for the Web",
+      "packageName": "WebAdapter",
+      "path": "reference/web.md",
+      "classes": [],
+      "interfaces": []
+    },
+    {
+      "name": "Botkit for Webex Teams",
+      "packageName": "WebexAdapter",
+      "path": "reference/webex.md",
+      "classes": [],
+      "interfaces": []
+    },
+    {
+      "name": "Botkit for Slack",
+      "packageName": "SlackAdapter",
+      "path": "reference/slack.md",
+      "classes": [],
+      "interfaces": []
+    },
+    {
+      "name": "Botkit for Hangouts",
+      "packageName": "HangoutsAdapter",
+      "path": "reference/hangouts.md",
+      "classes": [],
+      "interfaces": []
+    },
+    {
+      "name": "Botkit for Twilio SMS",
+      "packageName": "TwilioAdapter",
+      "path": "reference/twilio-sms.md",
+      "classes": [],
+      "interfaces": []
+    },
+    {
+      "name": "Botkit for Facebook",
+      "packageName": "FacebookAPI",
+      "path": "reference/facebook.md",
+      "classes": [],
+      "interfaces": []
+    },
+    {
+      "name": "Botkit CMS Plugin",
+      "packageName": "BotkitCMSHelper",
+      "path": "reference/cms.md",
+      "classes": [],
+      "interfaces": []
+    }
+  ],
+  "adapters": [
+    {
+      "name": "Websocket and Webhooks",
+      "path": "platforms/web.md"
+    },
+    {
+      "name": "Webex Teams",
+      "path": "platforms/webex.md"
+    },
+    {
+      "name": "Slack",
+      "path": "platforms/slack.md"
+    },
+    {
+      "name": "Google Hangouts",
+      "path": "platforms/hangouts.md"
+    },
+    {
+      "name": "Twilio SMS",
+      "path": "platforms/twilio-sms.md"
+    },
+    {
+      "name": "Facebook Messenger",
+      "path": "platforms/facebook.md"
+    }
+  ],
+  "plugins": [
+    {
+      "name": "Botkit CMS Plugin",
+      "path": "plugins/cms.md"
+    }
+  ]
+}
